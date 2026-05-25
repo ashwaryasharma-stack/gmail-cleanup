@@ -1,0 +1,10 @@
+.env
+credentials/*.json
+pending_deletions.json
+data/stats.json
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+.DS_Store
