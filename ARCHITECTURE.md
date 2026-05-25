@@ -30,7 +30,7 @@ fetch_recent_emails()  ───►  classify_emails()  ───►  { scan_dat
                                                format HTML         interactive CLI
                                                     │                    │
                                                     ▼                    ▼
-                                             send_digest_email()   trash_emails()
+                                             send_digest_email()   archive_emails()
                                              (via Gmail API)       (via Gmail API)
 ```
 
@@ -53,16 +53,22 @@ Wraps the Google Gmail API v1. Handles OAuth 2.0 token flow on first run.
 |---|---|
 | `_authenticate()` | OAuth flow; loads/refreshes/saves token |
 | `user_email` (property) | Fetches authenticated user's email address |
-| `fetch_recent_emails(days)` | Lists + gets metadata for emails in the past N days |
-| `trash_emails(ids)` | Moves emails to Trash (recoverable for 30 days) |
+| `fetch_recent_emails(days)` | Lists + gets metadata for **Primary inbox only** emails in the past N days (excludes Gmail's Promotions & Spam categories) |
+| `archive_emails(ids)` | Labels emails 'gmail-cleanup' and removes from INBOX (archived, never deleted) |
+| `_get_or_create_cleanup_label()` | Gets or creates the 'gmail-cleanup' Gmail label, caches label ID |
 | `send_digest_email(to, subject, html)` | Sends the digest via Gmail API |
+| `is_email_protected(email)` | Checks if email has custom labels or been replied to |
 
 **Email metadata fetched per message:** From, Subject, Date headers + snippet (first ~100 chars of body). Full body is never fetched — keeps it fast and cheap.
 
 **Pagination:** `fetch_recent_emails` handles `nextPageToken` to retrieve all matching messages beyond the 500-result page limit.
 
+**Scope:** Only fetches emails from Primary inbox tab, excluding Gmail's automatic Promotions and Spam categories. Query: `category:primary -category:promotions -category:spam`. This ensures focused cleanup of personal and work emails only.
+
 ### `classifier.py`
 Uses the Anthropic SDK to classify emails as junk or keep.
+
+**Scope:** Only processes emails from Primary inbox (Gmail's automatic Promotions and Spam categories excluded).
 
 **Key design decisions:**
 - **Batching:** processes `CLASSIFIER_BATCH_SIZE` (50) emails per API call to balance cost vs. latency
@@ -103,7 +109,7 @@ Uses `argparse` with subcommands. Each subcommand is a thin `cmd_*` function.
 |---|---|
 | `scan` | `GmailClient.fetch_recent_emails()` → `classify_emails()` → saves `pending_deletions.json` |
 | `digest` | Loads `pending_deletions.json` → `format_digest_html()` → `send_digest_email()` |
-| `approve` | Loads `pending_deletions.json` → category-based interactive prompt → `trash_emails()` → updates file |
+| `approve` | Loads `pending_deletions.json` → category-based interactive prompt → `archive_emails()` → updates file |
 | `run` | `scan` then `digest` in sequence |
 
 **`approve` flow — category-based:**
@@ -115,20 +121,20 @@ NEWSLETTERS (12 emails)
   amazon@newsletter.com — Your weekly picks
   medium.com — Top stories this week
   ... 10 more
-  Trash all 12? [y/n/show]: y  ✓
+  Archive all 12? [y/n/show]: y  ✓
 
 PROMOTIONAL / SALE ALERTS (18 emails)
-  Trash all 18? [y/n/show]: n  ✗ skipped
+  Archive all 18? [y/n/show]: n  ✗ skipped
 
 SOCIAL NOTIFICATIONS (7 emails)
-  Trash all 7? [y/n/show]: show
+  Archive all 7? [y/n/show]: show
     1. Twitter — @someone mentioned you
     2. LinkedIn — 3 new connections
     ...
-  Select to trash (e.g. 1,3,5-7 or all/none): 1,2
+  Select to archive (e.g. 1,3,5-7 or all/none): 1,2
 ```
 
-- `y` — trash the whole category
+- `y` — archive the whole category
 - `n` — skip this category, keep all
 - `show` — expand the list, then pick by number/range or `all`/`none`
 
@@ -206,10 +212,10 @@ List of whitelisted sender email addresses that should never be classified as ju
 | Scope | Used for |
 |---|---|
 | `gmail.readonly` | `fetch_recent_emails` — listing and reading message metadata |
-| `gmail.modify` | `trash_emails` — moving messages to Trash |
+| `gmail.modify` | `archive_emails` — applying label and removing from INBOX |
 | `gmail.send` | `send_digest_email` — sending the digest |
 
-`gmail.modify` does **not** permanently delete — it moves to Trash, which Gmail auto-purges after 30 days. Permanent deletion would require `https://mail.google.com/` (full access scope), which we deliberately avoid.
+`gmail.modify` covers both `messages().modify()` (for labeling and archiving) and `labels.create()` (for creating the 'gmail-cleanup' label on first run). Archived emails land in **All Mail** under the `gmail-cleanup` label — they are never deleted and can be restored at any time.
 
 ## Cost Estimates
 
@@ -230,10 +236,11 @@ Rough numbers for a typical inbox (200 emails/week):
 ### Dashboard features
 - Shows emails grouped by category (Promotions, Newsletters, Spam, Social)
 - Top 20 emails per category with "+ X more" count
+- **Per-email approval checkboxes** — each email requires explicit approval before deletion (safety critical)
 - "Never delete" button next to each sender — updates whitelist.json
-- Live count updates as you whitelist senders
-- "Approve X deletions" button at top and bottom
-- Triggers Gmail API deletion on approval
+- Live count updates as you approve/whitelist emails
+- "Approve X deletions" button — only deletes emails with explicit approval checkbox checked
+- Triggers Gmail API deletion on approval (only for approved emails)
 
 ## Infrastructure
 - GitHub — code storage (free)
@@ -246,3 +253,35 @@ Rough numbers for a typical inbox (200 emails/week):
 - Push code to GitHub → Railway auto deploys
 - API keys stored in Railway environment variables (never in code)
 - Gmail OAuth credentials stored as environment variables in Railway
+
+## Performance — Parallel Classification with Subagents
+- Use Claude Code subagents to classify email batches in parallel
+- Spin up 5 parallel agents, each handling a separate batch simultaneously
+- Results combined and merged after all agents complete
+- Expected improvement: 3 minutes → under 1 minute for 660 emails
+- Implemented in classifier.py using asyncio for parallel API calls
+
+## MVP2
+<!-- - Add ability to get back emails or undo action conducted. First discuss in plan mode how this action will be conducted
+- Add test scenarios for each email
+- Remove promotion email from scope -->
+
+# Safety Rules — Critical
+- **NO automatic deletions** — ZERO emails deleted automatically, ever
+- **Per-email approval required** — each email must have `"approved": true` before deletion
+- **Deletion only in /approve endpoint** — POST /approve is the ONLY place emails can be deleted
+- **Pending file structure:** each email starts with `"approved": false` (no deletion without explicit UI action)
+- **Dashboard implementation:** checkbox toggle calls `/toggle-approval` to set `approved: true/false` per email
+- **CLI approve flow:** interactive prompt requires explicit per-category confirmation
+- **No smoke tests touch Gmail data** — all test/dev code must use mock data only
+- **Archiving is reversible** — emails are labeled 'gmail-cleanup' and removed from Inbox, but remain in All Mail and can be restored anytime
+
+## Recovery
+- Gmail Trash retains deleted emails for 30 days
+- Emails can be recovered from Trash → Move to Inbox if accidentally deleted
+- IN SCOPE for deletion: Notifications, old read emails, social alerts, 
+  automated receipts older than 30 days, unread newsletters in main inbox
+- OUT OF SCOPE: Promotions tab emails — Gmail already handles these separately
+- OUT OF SCOPE: Spam folder — Gmail already filters these
+- OUT OF SCOPE: Any email less than 7 days old
+- OUT OF SCOPE: Any sender in whitelist.json

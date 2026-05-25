@@ -1,14 +1,14 @@
 # Gmail Cleanup
 
-Automated Gmail cleanup using Claude AI. Scans your inbox for junk emails, sends you a weekly digest, and deletes them on your approval.
+Automated Gmail cleanup using Claude AI. Scans your inbox for junk emails, sends you a weekly digest, and archives them with a 'gmail-cleanup' label on your approval.
 
 ## How It Works
 
 1. **Scan** — Fetches emails from the last 7 days and uses Claude to identify junk (newsletters, promotions, notifications, etc.)
 2. **Digest** — Emails you an HTML summary of what it found
-3. **Approve** — You review the list in your terminal and confirm what to trash
+3. **Approve** — You review the list in your terminal and confirm what to archive
 
-Emails are moved to **Trash** (not permanently deleted), so you can recover anything within 30 days.
+Approved emails are **labeled 'gmail-cleanup' and archived** (removed from Inbox, never deleted). They remain in All Mail and are fully recoverable — just remove the label to restore them.
 
 ### Safety Features
 
@@ -84,28 +84,28 @@ $ python main.py approve
    Amazon Newsletter — Your weekly picks
    Medium — Top stories this week
    ... and 10 more
-Trash all 12? [y/n/show] y
+Archive all 12? [y/n/show] y
    ✓ queued for deletion
 
 ── PROMOTIONS & SALE ALERTS (18) ──
    deals@amazon.com — 48-hour flash sale
    ... and 17 more
-Trash all 18? [y/n/show] show
+Archive all 18? [y/n/show] show
       1. deals@amazon.com  —  48-hour flash sale
       2. gap.com           —  Extra 40% off this weekend
       ...
-   Select to trash (e.g. 1,3,5-7 | all | none): 1,2
+   Select to archive (e.g. 1,3,5-7 | all | none): 1,2
 
 ── SOCIAL NOTIFICATIONS (7) ──
    ...
-Trash all 7? [y/n/show] n
+Archive all 7? [y/n/show] n
    ✗ skipped
 
-Trashing 14 emails...
-Done. 14 emails moved to Trash.
+Archiving 14 emails...
+Done. 14 emails archived with label 'gmail-cleanup'.
 ```
 
-- `y` — trash the whole category
+- `y` — archive the whole category
 - `n` — skip, keep all in this category
 - `show` — expand the list, then pick by number/range (`1,3,5-7`), `all`, or `none`
 
@@ -136,7 +136,7 @@ Add this line to run every Monday at 9 AM:
 ```
 gmail-cleanup/
 ├── main.py                  # CLI entry point (scan / digest / approve / run)
-├── gmail_client.py          # Gmail API wrapper (fetch, send, trash)
+├── gmail_client.py          # Gmail API wrapper (fetch, send, archive)
 ├── classifier.py            # Claude AI email classification with token logging
 ├── digest.py                # HTML digest email formatter with stats tracking
 ├── config.py                # Environment config

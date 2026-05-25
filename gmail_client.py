@@ -11,7 +11,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
-from config import CREDENTIALS_FILE, GMAIL_SCOPES, TOKEN_FILE
+from config import CREDENTIALS_FILE, CLEANUP_LABEL_NAME, GMAIL_SCOPES, TOKEN_FILE
 
 # System labels that don't protect an email from deletion
 _SYSTEM_LABELS = {
@@ -25,6 +25,7 @@ class GmailClient:
     def __init__(self):
         self.service = self._authenticate()
         self._user_email: str | None = None
+        self._cleanup_label_id: str | None = None
 
     def _authenticate(self):
         creds_path = Path(CREDENTIALS_FILE)
@@ -59,9 +60,30 @@ class GmailClient:
             self._user_email = profile["emailAddress"]
         return self._user_email
 
+    def _get_or_create_cleanup_label(self) -> str:
+        if self._cleanup_label_id:
+            return self._cleanup_label_id
+        result = self.service.users().labels().list(userId="me").execute()
+        for label in result.get("labels", []):
+            if label["name"] == CLEANUP_LABEL_NAME:
+                self._cleanup_label_id = label["id"]
+                return self._cleanup_label_id
+        created = self.service.users().labels().create(
+            userId="me",
+            body={
+                "name": CLEANUP_LABEL_NAME,
+                "labelListVisibility": "labelShow",
+                "messageListVisibility": "show",
+                "color": {"backgroundColor": "#ffd6a5", "textColor": "#4a1f00"},
+            },
+        ).execute()
+        self._cleanup_label_id = created["id"]
+        return self._cleanup_label_id
+
     def fetch_recent_emails(self, days: int = 7) -> list[dict]:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-        query = f"after:{cutoff.strftime('%Y/%m/%d')}"
+        # Fetch from Primary inbox only, exclude Gmail's system categories
+        query = f"after:{cutoff.strftime('%Y/%m/%d')} category:primary -category:promotions -category:spam"
 
         message_ids: list[str] = []
         page_token = None
@@ -99,10 +121,15 @@ class GmailClient:
 
         return emails
 
-    def trash_emails(self, email_ids: list[str]) -> int:
+    def archive_emails(self, email_ids: list[str]) -> int:
+        label_id = self._get_or_create_cleanup_label()
         count = 0
         for email_id in email_ids:
-            self.service.users().messages().trash(userId="me", id=email_id).execute()
+            self.service.users().messages().modify(
+                userId="me",
+                id=email_id,
+                body={"addLabelIds": [label_id], "removeLabelIds": ["INBOX"]},
+            ).execute()
             count += 1
         return count
 

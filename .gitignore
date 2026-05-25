@@ -2,6 +2,7 @@
 credentials/*.json
 pending_deletions.json
 data/stats.json
+data/token.txt
 __pycache__/
 *.pyc
 *.pyo

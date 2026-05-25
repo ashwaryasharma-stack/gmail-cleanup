@@ -27,14 +27,18 @@ _INPUT_COST_PER_1M = 3.0
 _OUTPUT_COST_PER_1M = 15.0
 
 
-def classify_emails(emails: list[dict]) -> list[dict]:
+def classify_emails(emails: list[dict]) -> tuple[list[dict], dict]:
     """Annotates each email with is_junk (bool), category (str), and reason (str).
 
+    Returns (annotated_emails, token_usage) where token_usage has keys:
+    input_tokens, output_tokens, cost_usd.
+
+    Scope: Only processes emails from Primary inbox (excludes Gmail's Promotions & Spam categories).
     Protected emails (with custom labels or replied-to) are marked as keep automatically.
     Batches emails and logs token usage + cost per batch.
     """
     if not emails:
-        return []
+        return [], {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
 
     gmail_client = GmailClient()
     protected = []
@@ -98,7 +102,12 @@ def classify_emails(emails: list[dict]) -> list[dict]:
         file=sys.stderr,
     )
 
-    return results
+    token_usage = {
+        "input_tokens": total_input_tokens,
+        "output_tokens": total_output_tokens,
+        "cost_usd": round(total_cost, 6),
+    }
+    return results, token_usage
 
 
 def _classify_batch(emails: list[dict]) -> tuple[list[dict], int, int]:

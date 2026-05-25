@@ -29,11 +29,21 @@ def cmd_scan(args) -> tuple[list[dict], str]:
     emails = client.fetch_recent_emails(days=DAYS_TO_SCAN)
     print(f"Found {len(emails)} emails. Classifying with Claude...", file=sys.stderr)
 
-    classified = classify_emails(emails)
+    classified, token_usage = classify_emails(emails)
     junk = [e for e in classified if e.get("is_junk")]
 
     scan_date = datetime.now(timezone.utc).isoformat()
-    PENDING_FILE.write_text(json.dumps({"scan_date": scan_date, "junk_emails": junk}, indent=2))
+    # Add approved=false to each email (safety: explicit approval required before deletion)
+    junk_with_approval = [
+        {**e, "approved": False}
+        for e in junk
+    ]
+    PENDING_FILE.write_text(json.dumps({
+        "scan_date": scan_date,
+        "total_scanned": len(emails),
+        "token_usage": token_usage,
+        "junk_emails": junk_with_approval,
+    }, indent=2))
 
     keep_count = len(emails) - len(junk)
     print(f"\nResults: {len(junk)} junk / {keep_count} to keep")
@@ -79,7 +89,7 @@ def cmd_approve(args) -> None:
 
     print(f"\n{len(junk)} junk emails pending, grouped by category.\n")
 
-    to_trash: list[dict] = []
+    to_archive: list[dict] = []
 
     for category, emails in groups.items():
         label = _CATEGORY_LABELS.get(category, category.upper())
@@ -94,9 +104,9 @@ def cmd_approve(args) -> None:
             print(f"   ... and {len(emails) - 3} more")
 
         while True:
-            choice = input(f"Trash all {len(emails)}? [y/n/show] ").strip().lower()
+            choice = input(f"Archive all {len(emails)}? [y/n/show] ").strip().lower()
             if choice == "y":
-                to_trash.extend(emails)
+                to_archive.extend(emails)
                 print("   ✓ queued for deletion\n")
                 break
             elif choice == "n" or choice == "":
@@ -104,33 +114,33 @@ def cmd_approve(args) -> None:
                 break
             elif choice == "show":
                 selected = _show_and_select(emails)
-                to_trash.extend(selected)
+                to_archive.extend(selected)
                 print(f"   ✓ {len(selected)} queued for deletion\n")
                 break
             else:
                 print("   Please enter y, n, or show.")
 
-    if not to_trash:
+    if not to_archive:
         print("Nothing selected — no emails deleted.")
         return
 
     # Final safeguard: filter out protected emails
     client = GmailClient()
-    protected_ids = {e["id"] for e in to_trash if client.is_email_protected(e)}
+    protected_ids = {e["id"] for e in to_archive if client.is_email_protected(e)}
     if protected_ids:
         print(f"Warning: Skipping {len(protected_ids)} protected email(s) (labeled or replied-to)")
-        to_trash = [e for e in to_trash if e["id"] not in protected_ids]
+        to_archive = [e for e in to_archive if e["id"] not in protected_ids]
 
-    if not to_trash:
-        print("No unprotected emails to trash.")
+    if not to_archive:
+        print("No unprotected emails to archive.")
         return
 
-    print(f"Trashing {len(to_trash)} emails...")
-    count = client.trash_emails([e["id"] for e in to_trash])
-    print(f"Done. {count} emails moved to Trash.")
+    print(f"Archiving {len(to_archive)} emails with label 'gmail-cleanup'...")
+    count = client.archive_emails([e["id"] for e in to_archive])
+    print(f"Done. {count} emails archived.")
 
-    trashed_ids = {e["id"] for e in to_trash}
-    data["junk_emails"] = [e for e in junk if e["id"] not in trashed_ids]
+    archived_ids = {e["id"] for e in to_archive}
+    data["junk_emails"] = [e for e in junk if e["id"] not in archived_ids]
     PENDING_FILE.write_text(json.dumps(data, indent=2))
 
 
@@ -146,7 +156,7 @@ def _show_and_select(emails: list[dict]) -> list[dict]:
     for i, e in enumerate(emails, 1):
         print(f"   {i:3}. {e['sender'][:45]}  —  {e['subject'][:55]}")
     print()
-    raw = input("   Select to trash (e.g. 1,3,5-7 | all | none): ").strip()
+    raw = input("   Select to archive (e.g. 1,3,5-7 | all | none): ").strip()
     return _parse_selection(raw, emails)
 
 
@@ -186,13 +196,13 @@ def main() -> None:
             "  python main.py run       # scan + send digest (weekly workflow)\n"
             "  python main.py scan      # classify emails, save results\n"
             "  python main.py digest    # email yourself the digest\n"
-            "  python main.py approve   # review and trash by category\n"
+            "  python main.py approve   # archive by category\n"
         ),
     )
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("scan",    help="Fetch and classify emails; save to pending_deletions.json")
     sub.add_parser("digest",  help="Send weekly digest email of pending junk")
-    sub.add_parser("approve", help="Review junk by category and move approved emails to Trash")
+    sub.add_parser("approve", help="Review junk by category and archive approved emails with label 'gmail-cleanup'")
     sub.add_parser("run",     help="scan + digest in one step (weekly automation entry point)")
 
     args = parser.parse_args()

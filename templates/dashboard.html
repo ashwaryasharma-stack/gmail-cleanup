@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>Gmail Cleanup</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --red:    #ff3b30;
+      --green:  #34c759;
+      --orange: #ff9500;
+      --blue:   #007aff;
+      --bg:     #f2f2f7;
+      --card:   #ffffff;
+      --sep:    #e5e5ea;
+      --text:   #1c1c1e;
+      --dim:    #8e8e93;
+      --dimmer: #aeaeb2;
+      --radius: 12px;
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 16px;
+      -webkit-font-smoothing: antialiased;
+      padding-bottom: calc(16px + var(--safe-bottom));
+    }
+
+    /* ── Sticky header ── */
+    .header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(242, 242, 247, 0.92);
+      -webkit-backdrop-filter: blur(20px);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--sep);
+      padding: 12px 16px;
+    }
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 10px;
+    }
+    .header h1 { font-size: 20px; font-weight: 700; }
+    .scan-date { font-size: 13px; color: var(--dim); }
+
+    /* ── Approve button ── */
+    .approve-btn {
+      display: block;
+      width: 100%;
+      background: var(--red);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      font-size: 17px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: opacity 0.15s, background 0.2s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .approve-btn:active { opacity: 0.8; }
+    .approve-btn:disabled { background: var(--dim); cursor: default; }
+    .approve-btn.done { background: var(--green); }
+    .approve-btn.empty { background: var(--dim); cursor: default; }
+
+    /* ── Stats cards ── */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      padding: 14px 16px;
+    }
+    .stat-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 14px 8px;
+      text-align: center;
+    }
+    .stat-num {
+      font-size: 30px;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .stat-label {
+      font-size: 11px;
+      color: var(--dim);
+      margin-top: 5px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    /* ── Category sections ── */
+    .section { margin: 0 16px 14px; }
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      background: var(--card);
+      border-radius: var(--radius) var(--radius) 0 0;
+      border-bottom: 1px solid var(--sep);
+    }
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      color: var(--dim);
+    }
+    .section-count {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--dim);
+      background: var(--bg);
+      padding: 2px 8px;
+      border-radius: 10px;
+    }
+
+    /* ── Email rows ── */
+    .email-list {
+      background: var(--card);
+      border-radius: 0 0 var(--radius) var(--radius);
+    }
+    .email-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--sep);
+      transition: opacity 0.25s, background-color 0.2s;
+    }
+    .email-row:last-child { border-bottom: none; }
+    .email-row.whitelisted {
+      opacity: 0.5;
+      background-color: #f9f9f9;
+    }
+
+    /* Checkbox styling */
+    .email-checkbox {
+      flex-shrink: 0;
+      width: 20px;
+      height: 20px;
+      cursor: pointer;
+      accent-color: var(--red);
+    }
+    .email-checkbox:disabled {
+      cursor: default;
+      opacity: 0.5;
+    }
+
+    .email-info { flex: 1; min-width: 0; }
+    .email-sender {
+      font-size: 14px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .email-subject {
+      font-size: 13px;
+      color: var(--dim);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 1px;
+    }
+    .email-reason {
+      font-size: 11px;
+      color: var(--dimmer);
+      margin-top: 2px;
+    }
+
+    /* ── Empty state ── */
+    .empty-state {
+      margin: 40px 16px;
+      text-align: center;
+    }
+    .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+    .empty-state h2 { font-size: 20px; font-weight: 600; margin-bottom: 6px; }
+    .empty-state p { font-size: 15px; color: var(--dim); }
+
+    /* ── Cost summary card ── */
+    .cost-card {
+      margin: 0 16px 14px;
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 16px;
+    }
+    .cost-card h3 {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      color: var(--dim);
+      margin-bottom: 12px;
+    }
+    .cost-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 14px;
+      padding: 5px 0;
+      border-bottom: 1px solid var(--sep);
+    }
+    .cost-row:last-child { border-bottom: none; }
+    .cost-row .label { color: var(--dim); }
+    .cost-total { font-weight: 600; color: var(--text); }
+
+    /* ── Bottom approve button ── */
+    .bottom-approve { padding: 0 16px 8px; }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed;
+      bottom: calc(24px + var(--safe-bottom));
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: rgba(30,30,30,0.92);
+      color: #fff;
+      padding: 12px 20px;
+      border-radius: 24px;
+      font-size: 15px;
+      font-weight: 500;
+      white-space: nowrap;
+      transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1);
+      z-index: 999;
+      pointer-events: none;
+    }
+    .toast.show { transform: translateX(-50%) translateY(0); }
+
+    /* More row styling */
+    .more-row {
+      padding: 9px 14px;
+      font-size: 13px;
+      color: var(--dimmer);
+      font-style: italic;
+      text-align: center;
+      background: var(--card);
+      border-radius: 0 0 var(--radius) var(--radius);
+    }
+  </style>
+</head>
+<body>
+
+<!-- Sticky header -->
+<div class="header">
+  <div class="header-top">
+    <h1>Gmail Cleanup</h1>
+    <span class="scan-date">
+      {% if scan_date %}{{ scan_date[:10] }}{% else %}No scan yet{% endif %}
+    </span>
+  </div>
+  {% if approved_count > 0 %}
+  <button class="approve-btn" id="approve-top" onclick="approveAll()">
+    Archive {{ approved_count }} emails
+  </button>
+  {% else %}
+  <button class="approve-btn empty" disabled>Nothing approved</button>
+  {% endif %}
+</div>
+
+<!-- Stats -->
+<div class="stats">
+  <div class="stat-card">
+    <div class="stat-num" style="color:var(--red)" id="stat-approved">{{ approved_count }}</div>
+    <div class="stat-label">To Delete</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num" style="color:var(--orange)">{{ total_junk }}</div>
+    <div class="stat-label">Junk Found</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num" style="color:var(--green)" id="stat-wl">{{ whitelisted_count }}</div>
+    <div class="stat-label">Whitelisted</div>
+  </div>
+</div>
+
+{% if total_junk == 0 %}
+<!-- Empty state -->
+<div class="empty-state">
+  <div class="icon">✉️</div>
+  <h2>Inbox looks clean</h2>
+  <p>Run <code>python main.py scan</code> to check for junk.</p>
+</div>
+
+{% else %}
+
+<!-- Category groups -->
+{% for category, emails in groups.items() %}
+{% set total = groups_total[category] %}
+<div class="section" id="section-{{ category }}">
+  <div class="section-header">
+    <span class="section-title">{{ category_labels.get(category, category) }}</span>
+    <span class="section-count" id="count-{{ category }}">{{ total }}</span>
+  </div>
+  <div class="email-list">
+    {% for email in emails %}
+    {% set sender_addr = email.sender.split('<')[1].split('>')[0].strip().lower() if '<' in email.sender else email.sender.strip().lower() %}
+    {% set is_whitelisted = sender_addr in whitelist %}
+    <div class="email-row {% if is_whitelisted %}whitelisted{% endif %}"
+         id="row-{{ email.id }}"
+         data-email-id="{{ email.id }}"
+         data-sender="{{ email.sender }}"
+         data-sender-addr="{{ sender_addr }}"
+         data-category="{{ category }}"
+         data-approved="{{ email.approved | lower }}">
+      <input type="checkbox"
+             class="email-checkbox"
+             data-email-id="{{ email.id }}"
+             data-sender="{{ email.sender }}"
+             data-sender-addr="{{ sender_addr }}"
+             data-category="{{ category }}"
+             {% if email.approved %}checked{% endif %}
+             {% if is_whitelisted %}disabled{% endif %}
+             onchange="toggleApproval(this)">
+      <div class="email-info">
+        <div class="email-sender" title="{{ email.sender }}">{{ email.sender }}</div>
+        <div class="email-subject">{{ email.subject }}</div>
+        {% if email.reason %}
+        <div class="email-reason">{{ email.reason }}</div>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% if total > 20 %}
+  <div class="more-row">+ {{ total - 20 }} more · check all in terminal</div>
+  {% endif %}
+</div>
+{% endfor %}
+
+<!-- Cost summary -->
+{% if token_usage %}
+<div class="cost-card">
+  <h3>Classification Cost</h3>
+  <div class="cost-row">
+    <span class="label">Input tokens</span>
+    <span>{{ token_usage.input_tokens | fmt_int }}</span>
+  </div>
+  <div class="cost-row">
+    <span class="label">Output tokens</span>
+    <span>{{ token_usage.output_tokens | fmt_int }}</span>
+  </div>
+  <div class="cost-row">
+    <span class="label">Total tokens</span>
+    <span>{{ (token_usage.input_tokens + token_usage.output_tokens) | fmt_int }}</span>
+  </div>
+  <div class="cost-row">
+    <span class="label">Estimated cost</span>
+    <span class="cost-total">${{ "%.4f" | format(token_usage.cost_usd) }}</span>
+  </div>
+</div>
+{% endif %}
+
+<!-- Bottom approve button -->
+{% if approved_count > 0 %}
+<div class="bottom-approve">
+  <button class="approve-btn" id="approve-bottom" onclick="approveAll()">
+    Archive {{ approved_count }} emails
+  </button>
+</div>
+{% endif %}
+
+{% endif %}
+
+<!-- Toast notification -->
+<div class="toast" id="toast"></div>
+
+<script>
+  const TOKEN = {{ token | tojson }};
+  const WHITELIST = {{ whitelist | tojson }};
+
+  let approvedCount = {{ approved_count }};
+  let whitelistedCount = {{ whitelisted_count }};
+
+  function extractEmailAddr(sender) {
+    if (sender.includes('<') && sender.includes('>')) {
+      return sender.split('<')[1].split('>')[0].trim().toLowerCase();
+    }
+    return sender.trim().toLowerCase();
+  }
+
+  function showToast(msg, duration = 2500) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), duration);
+  }
+
+  function updateButtons() {
+    const label = approvedCount > 0 ? `Delete ${approvedCount} emails` : 'Nothing approved';
+    const disabled = approvedCount === 0;
+    document.querySelectorAll('.approve-btn:not(.empty)').forEach(b => {
+      if (!b.classList.contains('done')) {
+        b.textContent = label;
+        b.disabled = disabled;
+      }
+    });
+    const stat = document.getElementById('stat-approved');
+    if (stat) stat.textContent = approvedCount;
+    const wlStat = document.getElementById('stat-wl');
+    if (wlStat) wlStat.textContent = whitelistedCount;
+  }
+
+  async function toggleApproval(checkbox) {
+    const emailId = checkbox.dataset.emailId;
+    const sender = checkbox.dataset.sender;
+    const senderAddr = checkbox.dataset.senderAddr;
+    const category = checkbox.dataset.category;
+    const isChecked = checkbox.checked;
+
+    // If unchecking, auto-whitelist the sender
+    if (!isChecked) {
+      try {
+        const res = await fetch('/whitelist?token=' + encodeURIComponent(TOKEN), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: TOKEN, sender }),
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+          // Add to whitelist array
+          if (!WHITELIST.includes(senderAddr)) {
+            WHITELIST.push(senderAddr);
+          }
+
+          // Uncheck all emails from this sender
+          document.querySelectorAll(`input[data-sender-addr="${senderAddr}"]`).forEach(cb => {
+            cb.checked = false;
+            cb.disabled = true;
+            cb.closest('.email-row').classList.add('whitelisted');
+            approvedCount = Math.max(0, approvedCount - 1);
+          });
+
+          whitelistedCount++;
+          updateButtons();
+          showToast(`Never delete emails from ${senderAddr}`);
+        } else {
+          checkbox.checked = true;
+          throw new Error(data.error || 'Failed to whitelist');
+        }
+      } catch (err) {
+        checkbox.checked = true;
+        showToast('Error: ' + err.message, 4000);
+        return;
+      }
+    }
+
+    // Toggle approval status
+    try {
+      const res = await fetch('/toggle-approval?token=' + encodeURIComponent(TOKEN), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: TOKEN, id: emailId }),
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        if (isChecked) {
+          approvedCount++;
+        } else {
+          approvedCount = Math.max(0, approvedCount - 1);
+        }
+        updateButtons();
+      } else {
+        checkbox.checked = !isChecked;
+        throw new Error(data.error || 'Failed to toggle approval');
+      }
+    } catch (err) {
+      showToast('Error: ' + err.message, 4000);
+    }
+  }
+
+  async function approveAll() {
+    if (approvedCount === 0) return;
+    if (!confirm(`Move ${approvedCount} emails to Trash?`)) return;
+
+    document.querySelectorAll('.approve-btn').forEach(b => {
+      b.disabled = true;
+      b.textContent = 'Archiving…';
+    });
+
+    try {
+      const res = await fetch('/approve?token=' + encodeURIComponent(TOKEN), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: TOKEN }),
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        document.querySelectorAll('.approve-btn').forEach(b => {
+          b.classList.add('done');
+          b.textContent = `✓ ${data.archived} emails archived`;
+        });
+        // Fade out deleted email rows
+        document.querySelectorAll('.email-row:not(.whitelisted) input:checked').forEach(cb => {
+          const row = cb.closest('.email-row');
+          row.style.opacity = '0';
+          row.style.transition = 'opacity 0.4s';
+          setTimeout(() => row.remove(), 400);
+        });
+        approvedCount = 0;
+        updateButtons();
+        showToast(`✓ ${data.archived} emails archived (label: gmail-cleanup)`);
+
+        // Reload page after 1.5s
+        setTimeout(() => location.reload(), 1500);
+      } else {
+        throw new Error(data.error || 'Unknown error');
+      }
+    } catch (err) {
+      document.querySelectorAll('.approve-btn').forEach(b => {
+        b.disabled = false;
+        b.textContent = `Archive ${approvedCount} emails`;
+      });
+      showToast('Error: ' + err.message, 4000);
+    }
+  }
+
+  // Initialize on load
+  window.addEventListener('DOMContentLoaded', updateButtons);
+</script>
+</body>
+</html>
