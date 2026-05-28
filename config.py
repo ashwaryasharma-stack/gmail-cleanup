@@ -21,3 +21,4 @@ DAYS_TO_SCAN          = int(os.environ.get("DAYS_TO_SCAN", "7"))
 CLASSIFIER_BATCH_SIZE = 50
 STATS_FILE            = Path(os.environ.get("STATS_FILE", "data/stats.json"))
 CLEANUP_LABEL_NAME = "gmail-cleanup"
+DASHBOARD_URL      = os.environ.get("DASHBOARD_URL", "http://localhost:5000")

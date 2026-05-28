@@ -57,7 +57,7 @@
     .approve-btn {
       display: block;
       width: 100%;
-      background: var(--red);
+      background: var(--green);
       color: #fff;
       border: none;
       border-radius: var(--radius);
@@ -398,7 +398,7 @@
   }
 
   function updateButtons() {
-    const label = approvedCount > 0 ? `Delete ${approvedCount} emails` : 'Nothing approved';
+    const label = approvedCount > 0 ? `Archive ${approvedCount} emails` : 'Nothing to archive';
     const disabled = approvedCount === 0;
     document.querySelectorAll('.approve-btn:not(.empty)').forEach(b => {
       if (!b.classList.contains('done')) {
@@ -414,48 +414,7 @@
 
   async function toggleApproval(checkbox) {
     const emailId = checkbox.dataset.emailId;
-    const sender = checkbox.dataset.sender;
-    const senderAddr = checkbox.dataset.senderAddr;
-    const category = checkbox.dataset.category;
     const isChecked = checkbox.checked;
-
-    // If unchecking, auto-whitelist the sender
-    if (!isChecked) {
-      try {
-        const res = await fetch('/whitelist?token=' + encodeURIComponent(TOKEN), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: TOKEN, sender }),
-        });
-        const data = await res.json();
-
-        if (res.ok) {
-          // Add to whitelist array
-          if (!WHITELIST.includes(senderAddr)) {
-            WHITELIST.push(senderAddr);
-          }
-
-          // Uncheck all emails from this sender
-          document.querySelectorAll(`input[data-sender-addr="${senderAddr}"]`).forEach(cb => {
-            cb.checked = false;
-            cb.disabled = true;
-            cb.closest('.email-row').classList.add('whitelisted');
-            approvedCount = Math.max(0, approvedCount - 1);
-          });
-
-          whitelistedCount++;
-          updateButtons();
-          showToast(`Never delete emails from ${senderAddr}`);
-        } else {
-          checkbox.checked = true;
-          throw new Error(data.error || 'Failed to whitelist');
-        }
-      } catch (err) {
-        checkbox.checked = true;
-        showToast('Error: ' + err.message, 4000);
-        return;
-      }
-    }
 
     // Toggle approval status
     try {

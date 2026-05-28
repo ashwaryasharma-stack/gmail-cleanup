@@ -8,7 +8,7 @@ from pathlib import Path
 
 from flask import Flask, abort, jsonify, render_template, request
 
-from config import PENDING_FILE, STATS_FILE
+from config import DIGEST_RECIPIENT, PENDING_FILE, STATS_FILE
 from gmail_client import GmailClient
 
 app = Flask(__name__)
@@ -49,9 +49,10 @@ def _verify_token() -> None:
 
 
 def _load_whitelist() -> set[str]:
-    if _WHITELIST_FILE.exists():
-        return set(json.loads(_WHITELIST_FILE.read_text()))
-    return set()
+    whitelist = set(json.loads(_WHITELIST_FILE.read_text())) if _WHITELIST_FILE.exists() else set()
+    if DIGEST_RECIPIENT:
+        whitelist.add(_extract_email_addr(DIGEST_RECIPIENT))
+    return whitelist
 
 
 def _extract_email_addr(sender: str) -> str:
@@ -74,10 +75,9 @@ def dashboard():
     else:
         pending = {"scan_date": None, "total_scanned": 0, "token_usage": None, "junk_emails": []}
 
-    # Initialize all emails as approved (checked) on first load
+    # Always start with all checkboxes checked; whitelist handles permanent exclusions
     for email in pending.get("junk_emails", []):
-        if "approved" not in email:
-            email["approved"] = True
+        email["approved"] = True
 
     whitelist = _load_whitelist()
     stats = json.loads(Path(STATS_FILE).read_text()) if Path(STATS_FILE).exists() else None
@@ -98,12 +98,13 @@ def dashboard():
 
     groups_total = {cat: len(emails) for cat, emails in groups.items()}
     groups_preview = {cat: emails[:20] for cat, emails in groups.items()}
+    total_junk = sum(len(e) for e in groups.values())
 
     return render_template(
         "dashboard.html",
         scan_date=pending.get("scan_date"),
         total_scanned=pending.get("total_scanned", 0),
-        total_junk=len(junk),
+        total_junk=total_junk,
         whitelisted_count=whitelisted_count,
         approved_count=approved_count,
         groups=groups_preview,
@@ -113,7 +114,7 @@ def dashboard():
         token=DASHBOARD_TOKEN,
         category_labels=_CATEGORY_LABELS,
         scope="Primary inbox only (Promotions & Spam excluded)",
-        whitelist=whitelist,
+        whitelist=sorted(whitelist),
     )
 
 

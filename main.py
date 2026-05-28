@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import secrets
 import sys
 from collections import defaultdict
 from datetime import datetime, timezone
+from pathlib import Path
 
 from config import DAYS_TO_SCAN, DIGEST_RECIPIENT, PENDING_FILE
 from classifier import classify_emails
@@ -19,6 +22,22 @@ _CATEGORY_LABELS = {
     "spam": "SPAM",
     "other": "OTHER",
 }
+
+
+_TOKEN_FILE = Path("data/token.txt")
+
+
+def _load_dashboard_token() -> str:
+    """Returns the dashboard security token, matching app.py's _load_token() logic."""
+    if tok := os.environ.get("DASHBOARD_TOKEN"):
+        return tok
+    if _TOKEN_FILE.exists():
+        return _TOKEN_FILE.read_text().strip()
+    # Generate and persist a new token so the dashboard URL stays stable
+    tok = secrets.token_urlsafe(32)
+    _TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _TOKEN_FILE.write_text(tok)
+    return tok
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────
@@ -59,10 +78,13 @@ def cmd_digest(args) -> None:
     data = json.loads(PENDING_FILE.read_text())
     junk = data["junk_emails"]
     scan_date = data["scan_date"]
+    token_usage = data.get("token_usage", {})
+
+    dashboard_token = _load_dashboard_token()
 
     client = GmailClient()
     recipient = DIGEST_RECIPIENT or client.user_email
-    html = format_digest_html(junk, scan_date)
+    html = format_digest_html(junk, scan_date, token_usage, dashboard_token)
     subject = f"Gmail Cleanup: {len(junk)} junk emails found ({scan_date[:10]})"
 
     print(f"Sending digest to {recipient}...")
