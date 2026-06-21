@@ -38,6 +38,7 @@ def _load_token() -> str:
 
 
 DASHBOARD_TOKEN = _load_token()
+print(f"\n  Dashboard token: {DASHBOARD_TOKEN}\n", flush=True)
 
 
 def _verify_token() -> None:
