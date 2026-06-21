@@ -192,5 +192,6 @@ def add_to_whitelist():
 
 
 if __name__ == "__main__":
-    print(f"\n  Dashboard URL: http://localhost:5000/?token={DASHBOARD_TOKEN}\n")
-    app.run(debug=False, port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    print(f"\n  Dashboard URL: http://localhost:{port}/?token={DASHBOARD_TOKEN}\n")
+    app.run(debug=False, host="0.0.0.0", port=port)
