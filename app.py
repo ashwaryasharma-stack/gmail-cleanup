@@ -71,6 +71,12 @@ def health():
     return "ok", 200
 
 
+@app.errorhandler(Exception)
+def handle_exception(e):
+    import traceback
+    return f"<pre>{traceback.format_exc()}</pre>", 500
+
+
 @app.get("/")
 def dashboard():
     _verify_token()
