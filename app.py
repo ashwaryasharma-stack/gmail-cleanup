@@ -80,19 +80,24 @@ def handle_exception(e):
 
 @app.get("/")
 def dashboard():
+    print("dashboard: verifying token", flush=True)
     _verify_token()
+    print("dashboard: token ok", flush=True)
 
     if PENDING_FILE.exists():
         pending = json.loads(PENDING_FILE.read_text())
     else:
         pending = {"scan_date": None, "total_scanned": 0, "token_usage": None, "junk_emails": []}
+    print("dashboard: pending loaded", flush=True)
 
     # Always start with all checkboxes checked; whitelist handles permanent exclusions
     for email in pending.get("junk_emails", []):
         email["approved"] = True
 
     whitelist = _load_whitelist()
+    print("dashboard: whitelist loaded", flush=True)
     stats = json.loads(Path(STATS_FILE).read_text()) if Path(STATS_FILE).exists() else None
+    print("dashboard: stats loaded", flush=True)
 
     junk = pending.get("junk_emails", [])
     groups: dict[str, list[dict]] = defaultdict(list)
@@ -112,6 +117,7 @@ def dashboard():
     groups_preview = {cat: emails[:20] for cat, emails in groups.items()}
     total_junk = sum(len(e) for e in groups.values())
 
+    print("dashboard: rendering template", flush=True)
     return render_template(
         "dashboard.html",
         scan_date=pending.get("scan_date"),
