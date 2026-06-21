@@ -66,6 +66,11 @@ def fmt_int(value: int) -> str:
     return f"{value:,}"
 
 
+@app.get("/health")
+def health():
+    return "ok", 200
+
+
 @app.get("/")
 def dashboard():
     _verify_token()
