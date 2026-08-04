@@ -3,13 +3,16 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import threading
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import Flask, abort, jsonify, render_template, request
 
 from config import DIGEST_RECIPIENT, PENDING_FILE, STATS_FILE
 from gmail_client import GmailClient
+from main import cmd_scan
 
 app = Flask(__name__)
 
@@ -39,6 +42,9 @@ def _load_token() -> str:
 
 DASHBOARD_TOKEN = _load_token()
 print(f"\n  Dashboard token: {DASHBOARD_TOKEN}\n", flush=True)
+
+_scan_lock = threading.Lock()
+_scan_state = {"running": False, "error": None, "started_at": None, "finished_at": None}
 
 
 def _verify_token() -> None:
@@ -188,6 +194,37 @@ def toggle_approval():
             return jsonify({"id": email_id, "approved": email["approved"]})
 
     return jsonify({"error": "Email not found"}), 404
+
+
+@app.post("/scan")
+def scan():
+    _verify_token()
+
+    with _scan_lock:
+        if _scan_state["running"]:
+            return jsonify({"error": "A scan is already in progress"}), 409
+        _scan_state["running"] = True
+        _scan_state["error"] = None
+        _scan_state["started_at"] = datetime.now(timezone.utc).isoformat()
+        _scan_state["finished_at"] = None
+
+    def _run_scan():
+        try:
+            cmd_scan(None)
+        except Exception as e:
+            _scan_state["error"] = str(e)
+        finally:
+            _scan_state["running"] = False
+            _scan_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+    threading.Thread(target=_run_scan, daemon=True).start()
+    return jsonify({"status": "started"})
+
+
+@app.get("/scan-status")
+def scan_status():
+    _verify_token()
+    return jsonify(_scan_state)
 
 
 @app.post("/whitelist")

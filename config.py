@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 
@@ -10,6 +11,18 @@ DIGEST_RECIPIENT  = os.environ.get("DIGEST_RECIPIENT", "")
 CREDENTIALS_FILE  = os.environ.get("CREDENTIALS_FILE", "credentials/credentials.json")
 TOKEN_FILE        = os.environ.get("TOKEN_FILE", "credentials/token.json")
 PENDING_FILE      = Path(os.environ.get("PENDING_FILE", "pending_deletions.json"))
+
+# On platforms like Railway, OAuth credentials are injected as env vars rather
+# than mounted files; write them out so GmailClient can read them normally.
+if os.environ.get("GOOGLE_CREDENTIALS"):
+    os.makedirs(os.path.dirname(CREDENTIALS_FILE) or ".", exist_ok=True)
+    with open(CREDENTIALS_FILE, "w") as f:
+        json.dump(json.loads(os.environ["GOOGLE_CREDENTIALS"]), f)
+
+if os.environ.get("GOOGLE_TOKEN"):
+    os.makedirs(os.path.dirname(TOKEN_FILE) or ".", exist_ok=True)
+    with open(TOKEN_FILE, "w") as f:
+        json.dump(json.loads(os.environ["GOOGLE_TOKEN"]), f)
 
 GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",

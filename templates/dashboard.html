@@ -74,6 +74,23 @@
     .approve-btn.done { background: var(--green); }
     .approve-btn.empty { background: var(--dim); cursor: default; }
 
+    /* ── Scan button ── */
+    .scan-btn {
+      flex-shrink: 0;
+      background: var(--blue);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      padding: 5px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .scan-btn:active { opacity: 0.8; }
+    .scan-btn:disabled { background: var(--dim); cursor: default; }
+
     /* ── Stats cards ── */
     .stats {
       display: grid;
@@ -256,9 +273,12 @@
 <div class="header">
   <div class="header-top">
     <h1>Gmail Cleanup</h1>
-    <span class="scan-date">
-      {% if scan_date %}{{ scan_date[:10] }}{% else %}No scan yet{% endif %}
-    </span>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <span class="scan-date">
+        {% if scan_date %}{{ scan_date[:10] }}{% else %}No scan yet{% endif %}
+      </span>
+      <button class="scan-btn" id="scan-btn" onclick="runScan()">Run Scan</button>
+    </div>
   </div>
   {% if approved_count > 0 %}
   <button class="approve-btn" id="approve-top" onclick="approveAll()">
@@ -488,8 +508,81 @@
     }
   }
 
+  let scanPolling = null;
+
+  async function runScan() {
+    const btn = document.getElementById('scan-btn');
+    btn.disabled = true;
+    btn.textContent = 'Scanning…';
+
+    try {
+      const res = await fetch('/scan?token=' + encodeURIComponent(TOKEN), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: TOKEN }),
+      });
+      const data = await res.json();
+
+      if (res.status === 409) {
+        showToast('A scan is already running…');
+        pollScanStatus();
+        return;
+      }
+      if (!res.ok) throw new Error(data.error || 'Failed to start scan');
+
+      showToast('Scan started — this can take a minute…');
+      pollScanStatus();
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = 'Run Scan';
+      showToast('Error: ' + err.message, 4000);
+    }
+  }
+
+  function pollScanStatus() {
+    if (scanPolling) return;
+    scanPolling = setInterval(async () => {
+      try {
+        const res = await fetch('/scan-status?token=' + encodeURIComponent(TOKEN));
+        const data = await res.json();
+        if (!data.running) {
+          clearInterval(scanPolling);
+          scanPolling = null;
+          const btn = document.getElementById('scan-btn');
+          if (data.error) {
+            btn.disabled = false;
+            btn.textContent = 'Run Scan';
+            showToast('Scan failed: ' + data.error, 5000);
+          } else {
+            showToast('Scan complete — refreshing…');
+            setTimeout(() => location.reload(), 1000);
+          }
+        }
+      } catch (err) {
+        clearInterval(scanPolling);
+        scanPolling = null;
+      }
+    }, 3000);
+  }
+
+  async function checkScanOnLoad() {
+    try {
+      const res = await fetch('/scan-status?token=' + encodeURIComponent(TOKEN));
+      const data = await res.json();
+      if (data.running) {
+        const btn = document.getElementById('scan-btn');
+        btn.disabled = true;
+        btn.textContent = 'Scanning…';
+        pollScanStatus();
+      }
+    } catch (err) { /* dashboard still usable without scan status */ }
+  }
+
   // Initialize on load
-  window.addEventListener('DOMContentLoaded', updateButtons);
+  window.addEventListener('DOMContentLoaded', () => {
+    updateButtons();
+    checkScanOnLoad();
+  });
 </script>
 </body>
 </html>

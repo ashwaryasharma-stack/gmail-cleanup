@@ -1,7 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "Bash(pkill -f \"python app.py\")"
+      "Bash(pkill -f \"python app.py\")",
+      "Bash(git -C /Users/swatash/TestCode/gmail-cleanup log --oneline -15)",
+      "Bash(railway --version)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app.py'\\).read\\(\\)\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('templates/dashboard.html'\\).read\\(\\)\\)\")",
+      "Bash(python -m py_compile app.py main.py)",
+      "Bash(python -c \"import app\")"
     ]
   }
 }
