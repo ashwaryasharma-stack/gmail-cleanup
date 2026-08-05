@@ -10,7 +10,11 @@
       "Bash(python -c \"import ast; ast.parse\\(open\\('app.py'\\).read\\(\\)\\)\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('templates/dashboard.html'\\).read\\(\\)\\)\")",
       "Bash(python -m py_compile app.py main.py)",
-      "Bash(python -c \"import app\")"
+      "Bash(python -c \"import app\")",
+      "Bash(python3 -c ' *)",
+      "Bash(python -m py_compile app.py)",
+      "Bash(pip3 show *)",
+      "Bash(python3 -c \"import sys; print\\(sys.path\\)\")"
     ]
   }
 }

@@ -5,7 +5,8 @@ import os
 import secrets
 import threading
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 from flask import Flask, abort, jsonify, render_template, request
@@ -71,6 +72,38 @@ def _extract_email_addr(sender: str) -> str:
 @app.template_filter("fmt_int")
 def fmt_int(value: int) -> str:
     return f"{value:,}"
+
+
+def _nth_sunday_utc(year: int, month: int, n: int) -> datetime:
+    first = datetime(year, month, 1, tzinfo=timezone.utc)
+    first_sunday = first + timedelta(days=(6 - first.weekday()) % 7)
+    return first_sunday + timedelta(weeks=n - 1)
+
+
+def _is_us_eastern_dst(dt_utc: datetime) -> bool:
+    """US DST runs from 2nd Sunday of March 07:00 UTC to 1st Sunday of November 06:00 UTC."""
+    dst_start = _nth_sunday_utc(dt_utc.year, 3, 2).replace(hour=7)
+    dst_end = _nth_sunday_utc(dt_utc.year, 11, 1).replace(hour=6)
+    return dst_start <= dt_utc < dst_end
+
+
+def _to_eastern(dt: datetime) -> datetime:
+    dt_utc = dt.astimezone(timezone.utc)
+    offset = timedelta(hours=-4) if _is_us_eastern_dst(dt_utc) else timedelta(hours=-5)
+    return dt_utc.astimezone(timezone(offset))
+
+
+@app.template_filter("fmt_email_date")
+def fmt_email_date(value: str) -> str:
+    if not value:
+        return ""
+    try:
+        dt = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return ""
+    dt = _to_eastern(dt)
+    hour_12 = dt.strftime("%I:%M %p").lstrip("0")
+    return f"{dt.strftime('%b')} {dt.day}, {hour_12}"
 
 
 @app.get("/health")
@@ -149,13 +182,16 @@ def approve():
     if not PENDING_FILE.exists():
         return jsonify({"error": "No pending scan found"}), 404
 
+    data = request.get_json() or {}
+    checked_ids = set(data.get("ids", []))
+
     pending = json.loads(PENDING_FILE.read_text())
     whitelist = _load_whitelist()
 
-    # Only delete emails that are explicitly approved AND not whitelisted
+    # Only delete emails whose checkbox was actually checked in the browser AND not whitelisted
     to_delete = [
         e for e in pending["junk_emails"]
-        if e.get("approved", False) and _extract_email_addr(e["sender"]) not in whitelist
+        if e["id"] in checked_ids and _extract_email_addr(e["sender"]) not in whitelist
     ]
 
     if not to_delete:

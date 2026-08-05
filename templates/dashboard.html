@@ -177,12 +177,26 @@
     }
 
     .email-info { flex: 1; min-width: 0; }
+    .email-top-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 8px;
+    }
     .email-sender {
+      flex: 1 1 auto;
+      min-width: 0;
       font-size: 14px;
       font-weight: 500;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+    .email-date {
+      flex-shrink: 0;
+      font-size: 11px;
+      color: var(--dim);
+      white-space: nowrap;
     }
     .email-subject {
       font-size: 13px;
@@ -344,7 +358,10 @@
              {% if is_whitelisted %}disabled{% endif %}
              onchange="toggleApproval(this)">
       <div class="email-info">
-        <div class="email-sender" title="{{ email.sender }}">{{ email.sender }}</div>
+        <div class="email-top-row">
+          <div class="email-sender" title="{{ email.sender }}">{{ email.sender }}</div>
+          <div class="email-date">{{ email.date | fmt_email_date }}</div>
+        </div>
         <div class="email-subject">{{ email.subject }}</div>
         {% if email.reason %}
         <div class="email-reason">{{ email.reason }}</div>
@@ -400,7 +417,6 @@
   const TOKEN = {{ token | tojson }};
   const WHITELIST = {{ whitelist | tojson }};
 
-  let approvedCount = {{ approved_count }};
   let whitelistedCount = {{ whitelisted_count }};
 
   function extractEmailAddr(sender) {
@@ -417,9 +433,17 @@
     setTimeout(() => t.classList.remove('show'), duration);
   }
 
+  // Checked checkboxes are the single source of truth for what gets archived —
+  // never a separately tracked counter, which can drift from what's on screen.
+  function getCheckedIds() {
+    return Array.from(document.querySelectorAll('.email-checkbox:checked:not(:disabled)'))
+      .map(cb => cb.dataset.emailId);
+  }
+
   function updateButtons() {
-    const label = approvedCount > 0 ? `Archive ${approvedCount} emails` : 'Nothing to archive';
-    const disabled = approvedCount === 0;
+    const count = getCheckedIds().length;
+    const label = count > 0 ? `Archive ${count} emails` : 'Nothing to archive';
+    const disabled = count === 0;
     document.querySelectorAll('.approve-btn:not(.empty)').forEach(b => {
       if (!b.classList.contains('done')) {
         b.textContent = label;
@@ -427,7 +451,7 @@
       }
     });
     const stat = document.getElementById('stat-approved');
-    if (stat) stat.textContent = approvedCount;
+    if (stat) stat.textContent = count;
     const wlStat = document.getElementById('stat-wl');
     if (wlStat) wlStat.textContent = whitelistedCount;
   }
@@ -436,7 +460,9 @@
     const emailId = checkbox.dataset.emailId;
     const isChecked = checkbox.checked;
 
-    // Toggle approval status
+    updateButtons();
+
+    // Persist approval status (best-effort; the DOM checkbox stays the source of truth)
     try {
       const res = await fetch('/toggle-approval?token=' + encodeURIComponent(TOKEN), {
         method: 'POST',
@@ -445,15 +471,9 @@
       });
       const data = await res.json();
 
-      if (res.ok) {
-        if (isChecked) {
-          approvedCount++;
-        } else {
-          approvedCount = Math.max(0, approvedCount - 1);
-        }
-        updateButtons();
-      } else {
+      if (!res.ok) {
         checkbox.checked = !isChecked;
+        updateButtons();
         throw new Error(data.error || 'Failed to toggle approval');
       }
     } catch (err) {
@@ -462,8 +482,9 @@
   }
 
   async function approveAll() {
-    if (approvedCount === 0) return;
-    if (!confirm(`Move ${approvedCount} emails to Trash?`)) return;
+    const ids = getCheckedIds();
+    if (ids.length === 0) return;
+    if (!confirm(`Move ${ids.length} emails to Trash?`)) return;
 
     document.querySelectorAll('.approve-btn').forEach(b => {
       b.disabled = true;
@@ -474,7 +495,7 @@
       const res = await fetch('/approve?token=' + encodeURIComponent(TOKEN), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: TOKEN }),
+        body: JSON.stringify({ token: TOKEN, ids: ids }),
       });
       const data = await res.json();
 
@@ -483,15 +504,15 @@
           b.classList.add('done');
           b.textContent = `✓ ${data.archived} emails archived`;
         });
-        // Fade out deleted email rows
-        document.querySelectorAll('.email-row:not(.whitelisted) input:checked').forEach(cb => {
-          const row = cb.closest('.email-row');
-          row.style.opacity = '0';
-          row.style.transition = 'opacity 0.4s';
-          setTimeout(() => row.remove(), 400);
+        // Fade out the rows we just archived
+        const archivedSet = new Set(ids);
+        document.querySelectorAll('.email-row').forEach(row => {
+          if (archivedSet.has(row.dataset.emailId)) {
+            row.style.opacity = '0';
+            row.style.transition = 'opacity 0.4s';
+            setTimeout(() => row.remove(), 400);
+          }
         });
-        approvedCount = 0;
-        updateButtons();
         showToast(`✓ ${data.archived} emails archived (label: gmail-cleanup)`);
 
         // Reload page after 1.5s
@@ -502,8 +523,8 @@
     } catch (err) {
       document.querySelectorAll('.approve-btn').forEach(b => {
         b.disabled = false;
-        b.textContent = `Archive ${approvedCount} emails`;
       });
+      updateButtons();
       showToast('Error: ' + err.message, 4000);
     }
   }
