@@ -14,7 +14,7 @@ from flask import Flask, abort, jsonify, render_template, request
 
 from config import DIGEST_RECIPIENT, PENDING_FILE, STATS_FILE
 from gmail_client import GmailClient
-from main import cmd_scan
+from main import cmd_run
 
 app = Flask(__name__)
 
@@ -262,7 +262,7 @@ def scan():
 
         def _run_scan():
             try:
-                cmd_scan(None)
+                cmd_run(None)
             except Exception as e:
                 _scan_state["error"] = str(e)
                 print(f"SCAN ERROR: {e}")
