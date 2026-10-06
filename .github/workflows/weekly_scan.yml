@@ -10,8 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Gmail scan
+        env:
+          DASHBOARD_TOKEN: ${{ secrets.DASHBOARD_TOKEN }}
         run: |
           curl --fail --silent --show-error \
             --request POST \
-            --header "Authorization: Bearer ${{ secrets.DASHBOARD_TOKEN }}" \
-            "https://gmail-cleanup.onrender.com/scan"
+            "https://gmail-cleanup.onrender.com/scan?token=${DASHBOARD_TOKEN}"
