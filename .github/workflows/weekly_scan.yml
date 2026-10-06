@@ -1,0 +1,17 @@
+name: Weekly Gmail Cleanup
+
+on:
+  schedule:
+    - cron: '0 13 * * 5'
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Gmail scan
+        run: |
+          curl --fail --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer ${{ secrets.DASHBOARD_TOKEN }}" \
+            "https://gmail-cleanup.onrender.com/scan"
