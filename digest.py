@@ -6,7 +6,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from config import DASHBOARD_URL, STATS_FILE
+from config import BASE_URL, STATS_FILE
 
 _CATEGORY_LABELS = {
     "newsletters": "Newsletters",
@@ -43,7 +43,7 @@ def format_digest_html(
         token_usage = {}
 
     # ── 1. Dashboard approval link ────────────────────────────────────────────
-    base_url = DASHBOARD_URL.rstrip("/")
+    base_url = BASE_URL.rstrip("/")
     dashboard_href = f"{base_url}/?token={dashboard_token}" if dashboard_token else base_url
     dashboard_section = f"""  <div style="margin-bottom:28px;text-align:center">
     <a href="{dashboard_href}"
