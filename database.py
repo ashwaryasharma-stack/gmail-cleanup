@@ -44,9 +44,14 @@ def init_db() -> None:
                     is_junk BOOLEAN NOT NULL DEFAULT TRUE,
                     category TEXT NOT NULL DEFAULT 'other',
                     reason TEXT NOT NULL DEFAULT '',
-                    approved BOOLEAN NOT NULL DEFAULT FALSE
+                    approved BOOLEAN NOT NULL DEFAULT FALSE,
+                    archived BOOLEAN NOT NULL DEFAULT FALSE,
+                    archived_at TIMESTAMPTZ
                 )
             """)
+            # Migrate tables created before archived/archived_at existed
+            cur.execute("ALTER TABLE pending_emails ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE")
+            cur.execute("ALTER TABLE pending_emails ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS whitelist (
                     email TEXT PRIMARY KEY,
@@ -80,6 +85,7 @@ def get_pending() -> dict | None:
                 SELECT id, subject, sender, date, snippet, label_ids,
                        has_been_replied_to, is_junk, category, reason, approved
                 FROM pending_emails
+                WHERE archived = FALSE
             """)
             emails = [dict(row) for row in cur.fetchall()]
     return {
@@ -91,11 +97,15 @@ def get_pending() -> dict | None:
 
 
 def save_pending(scan_date: str, total_scanned: int, token_usage: dict, junk_emails: list[dict]) -> None:
-    """Replaces the current pending scan with new data."""
+    """Replaces the current pending scan with new data.
+
+    Only unarchived rows are cleared — archived emails are kept forever so
+    all-time/weekly archive stats stay accurate across scans.
+    """
     with _db() as conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM pending_scan")
-            cur.execute("DELETE FROM pending_emails")
+            cur.execute("DELETE FROM pending_emails WHERE archived = FALSE")
             cur.execute(
                 "INSERT INTO pending_scan (scan_date, total_scanned, token_usage) VALUES (%s, %s, %s)",
                 (scan_date, total_scanned, json.dumps(token_usage or {})),
@@ -154,12 +164,18 @@ def toggle_email_approval(email_id: str) -> bool | None:
     return row[0] if row else None
 
 
-def remove_pending_emails(email_ids: list[str]) -> None:
+def archive_pending_emails(email_ids: list[str]) -> int:
+    """Marks emails archived instead of deleting them, so they still count toward archive stats."""
     if not email_ids:
-        return
+        return 0
     with _db() as conn:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM pending_emails WHERE id = ANY(%s)", (list(email_ids),))
+            cur.execute(
+                "UPDATE pending_emails SET archived = TRUE, archived_at = NOW()"
+                " WHERE id = ANY(%s) AND archived = FALSE",
+                (list(email_ids),),
+            )
+            return cur.rowcount
 
 
 # ── Whitelist ─────────────────────────────────────────────────────────────────
@@ -218,6 +234,26 @@ def get_stats() -> dict | None:
         "total_junk": total_junk,
         "total_by_category": total_by_category,
         "total_estimated_cost": round(total_cost, 6),
+    }
+
+
+def get_archive_stats() -> dict:
+    """Returns cumulative archive activity: all-time total, this week's total, and the most recent archive time."""
+    with _db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM pending_emails WHERE archived = TRUE")
+            total_all_time = cur.fetchone()[0]
+            cur.execute(
+                "SELECT COUNT(*) FROM pending_emails"
+                " WHERE archived = TRUE AND archived_at >= NOW() - INTERVAL '7 days'"
+            )
+            total_this_week = cur.fetchone()[0]
+            cur.execute("SELECT MAX(archived_at) FROM pending_emails WHERE archived = TRUE")
+            last_archived_at = cur.fetchone()[0]
+    return {
+        "total_all_time": total_all_time,
+        "total_this_week": total_this_week,
+        "last_archived_at": last_archived_at,
     }
 
 

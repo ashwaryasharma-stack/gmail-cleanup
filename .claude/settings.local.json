@@ -23,7 +23,10 @@
       "Bash(python3 -c \"import database; print\\('database module import OK'\\)\")",
       "Bash(python -m py_compile config.py app.py main.py)",
       "Bash(python3 -c \"import app; print\\('app.py import OK, token:', app.DASHBOARD_TOKEN[:8] + '...'\\)\")",
-      "Bash(python3 -c \"import main; print\\('main.py import OK'\\)\")"
+      "Bash(python3 -c \"import main; print\\('main.py import OK'\\)\")",
+      "Bash(python -m py_compile app.py main.py database.py)",
+      "Bash(python3 -c \"import app; print\\('app import OK'\\)\")",
+      "Bash(python3 -c \"import main; print\\('main import OK'\\)\")"
     ]
   }
 }

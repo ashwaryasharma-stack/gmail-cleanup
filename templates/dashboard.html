@@ -319,12 +319,35 @@
   </div>
 </div>
 
+<!-- Archive activity -->
+<div class="cost-card" id="archive-activity-card">
+  <h3>Archive Activity</h3>
+  <div class="cost-row">
+    <span class="label">Total archived (all time)</span>
+    <span class="cost-total">{{ archive_stats.total_all_time | fmt_int }}</span>
+  </div>
+  <div class="cost-row">
+    <span class="label">Archived this week</span>
+    <span class="cost-total">{{ archive_stats.total_this_week | fmt_int }}</span>
+  </div>
+  <div class="cost-row">
+    <span class="label">Last archived</span>
+    <span class="cost-total">{{ archive_stats.last_archived_at or "Never" }}</span>
+  </div>
+</div>
+
 {% if total_junk == 0 %}
 <!-- Empty state -->
 <div class="empty-state">
+  {% if just_archived %}
+  <div class="icon">✅</div>
+  <h2>All done! {{ just_archived }} emails archived</h2>
+  <p>0 emails remaining.</p>
+  {% else %}
   <div class="icon">✉️</div>
   <h2>Inbox looks clean</h2>
   <p>Run <code>python main.py scan</code> to check for junk.</p>
+  {% endif %}
 </div>
 
 {% else %}
@@ -515,8 +538,10 @@
         });
         showToast(`✓ ${data.archived} emails archived (label: gmail-cleanup)`);
 
-        // Reload page after 1.5s
-        setTimeout(() => location.reload(), 1500);
+        // Redirect after 1.5s so the reloaded dashboard knows how many were just archived
+        setTimeout(() => {
+          window.location.href = '/?token=' + encodeURIComponent(TOKEN) + '&archived=' + data.archived;
+        }, 1500);
       } else {
         throw new Error(data.error || 'Unknown error');
       }

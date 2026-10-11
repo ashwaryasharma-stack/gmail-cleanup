@@ -133,7 +133,7 @@ def cmd_approve(args) -> None:
     print(f"Done. {count} emails archived.")
 
     archived_ids = [e["id"] for e in to_archive]
-    database.remove_pending_emails(archived_ids)
+    database.archive_pending_emails(archived_ids)
 
 
 def cmd_run(args) -> None:

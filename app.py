@@ -80,6 +80,12 @@ def _to_eastern(dt: datetime) -> datetime:
     return dt_utc.astimezone(timezone(offset))
 
 
+def _format_eastern(dt: datetime) -> str:
+    dt = _to_eastern(dt)
+    hour_12 = dt.strftime("%I:%M %p").lstrip("0")
+    return f"{dt.strftime('%b')} {dt.day}, {hour_12}"
+
+
 @app.template_filter("fmt_email_date")
 def fmt_email_date(value: str) -> str:
     if not value:
@@ -88,9 +94,7 @@ def fmt_email_date(value: str) -> str:
         dt = parsedate_to_datetime(value)
     except (TypeError, ValueError):
         return ""
-    dt = _to_eastern(dt)
-    hour_12 = dt.strftime("%I:%M %p").lstrip("0")
-    return f"{dt.strftime('%b')} {dt.day}, {hour_12}"
+    return _format_eastern(dt)
 
 
 @app.get("/health")
@@ -122,6 +126,15 @@ def dashboard():
         stats = database.get_stats()
         print("dashboard: stats loaded", flush=True)
 
+        archive_stats = database.get_archive_stats()
+        last_archived_at = archive_stats["last_archived_at"]
+        archive_stats = {
+            "total_all_time": archive_stats["total_all_time"],
+            "total_this_week": archive_stats["total_this_week"],
+            "last_archived_at": _format_eastern(last_archived_at) if last_archived_at else None,
+        }
+        just_archived = request.args.get("archived", type=int)
+
         junk = pending.get("junk_emails", [])
         groups: dict[str, list[dict]] = defaultdict(list)
         whitelisted_count = 0
@@ -152,6 +165,8 @@ def dashboard():
             groups_total=groups_total,
             token_usage=pending.get("token_usage"),
             stats=stats,
+            archive_stats=archive_stats,
+            just_archived=just_archived,
             token=DASHBOARD_TOKEN,
             category_labels=_CATEGORY_LABELS,
             scope="Primary inbox only (Promotions & Spam excluded)",
@@ -189,7 +204,7 @@ def approve():
         client = GmailClient()
         count = client.archive_emails([e["id"] for e in to_delete])
 
-        database.remove_pending_emails([e["id"] for e in to_delete])
+        database.archive_pending_emails([e["id"] for e in to_delete])
 
         return jsonify({"archived": count})
     except Exception as e:
