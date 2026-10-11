@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import secrets
 import threading
@@ -8,18 +7,17 @@ import traceback
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
-from pathlib import Path
 
 from flask import Flask, abort, jsonify, render_template, request
 
-from config import DIGEST_RECIPIENT, PENDING_FILE, STATS_FILE
+import database
+from config import DASHBOARD_TOKEN, DIGEST_RECIPIENT
 from gmail_client import GmailClient
 from main import cmd_run
 
 app = Flask(__name__)
 
-_WHITELIST_FILE = Path("data/whitelist.json")
-_TOKEN_FILE = Path("data/token.txt")
+database.init_db()
 
 _CATEGORY_LABELS = {
     "newsletters": "Newsletters",
@@ -31,18 +29,6 @@ _CATEGORY_LABELS = {
 }
 
 
-def _load_token() -> str:
-    if tok := os.environ.get("DASHBOARD_TOKEN"):
-        return tok
-    if _TOKEN_FILE.exists():
-        return _TOKEN_FILE.read_text().strip()
-    tok = secrets.token_urlsafe(32)
-    _TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _TOKEN_FILE.write_text(tok)
-    return tok
-
-
-DASHBOARD_TOKEN = _load_token()
 print(f"\n  Dashboard token: {DASHBOARD_TOKEN}\n", flush=True)
 
 _scan_lock = threading.Lock()
@@ -58,7 +44,7 @@ def _verify_token() -> None:
 
 
 def _load_whitelist() -> set[str]:
-    whitelist = set(json.loads(_WHITELIST_FILE.read_text())) if _WHITELIST_FILE.exists() else set()
+    whitelist = database.get_whitelist()
     if DIGEST_RECIPIENT:
         whitelist.add(_extract_email_addr(DIGEST_RECIPIENT))
     return whitelist
@@ -124,10 +110,7 @@ def dashboard():
     print("dashboard: token ok", flush=True)
 
     try:
-        if PENDING_FILE.exists():
-            pending = json.loads(PENDING_FILE.read_text())
-        else:
-            pending = {"scan_date": None, "total_scanned": 0, "token_usage": None, "junk_emails": []}
+        pending = database.get_pending() or {"scan_date": None, "total_scanned": 0, "token_usage": None, "junk_emails": []}
         print("dashboard: pending loaded", flush=True)
 
         # Always start with all checkboxes checked; whitelist handles permanent exclusions
@@ -136,7 +119,7 @@ def dashboard():
 
         whitelist = _load_whitelist()
         print("dashboard: whitelist loaded", flush=True)
-        stats = json.loads(Path(STATS_FILE).read_text()) if Path(STATS_FILE).exists() else None
+        stats = database.get_stats()
         print("dashboard: stats loaded", flush=True)
 
         junk = pending.get("junk_emails", [])
@@ -185,13 +168,13 @@ def approve():
     _verify_token()
 
     try:
-        if not PENDING_FILE.exists():
+        if not database.has_pending():
             return jsonify({"error": "No pending scan found"}), 404
 
         data = request.get_json() or {}
         checked_ids = set(data.get("ids", []))
 
-        pending = json.loads(PENDING_FILE.read_text())
+        pending = database.get_pending()
         whitelist = _load_whitelist()
 
         # Only delete emails whose checkbox was actually checked in the browser AND not whitelisted
@@ -206,9 +189,7 @@ def approve():
         client = GmailClient()
         count = client.archive_emails([e["id"] for e in to_delete])
 
-        archived_ids = {e["id"] for e in to_delete}
-        pending["junk_emails"] = [e for e in pending["junk_emails"] if e["id"] not in archived_ids]
-        PENDING_FILE.write_text(json.dumps(pending, indent=2))
+        database.remove_pending_emails([e["id"] for e in to_delete])
 
         return jsonify({"archived": count})
     except Exception as e:
@@ -223,7 +204,7 @@ def toggle_approval():
     _verify_token()
 
     try:
-        if not PENDING_FILE.exists():
+        if not database.has_pending():
             return jsonify({"error": "No pending scan found"}), 404
 
         data = request.get_json() or {}
@@ -231,16 +212,10 @@ def toggle_approval():
         if not email_id:
             return jsonify({"error": "id is required"}), 400
 
-        pending = json.loads(PENDING_FILE.read_text())
-
-        # Find and toggle the email's approval status
-        for email in pending["junk_emails"]:
-            if email["id"] == email_id:
-                email["approved"] = not email.get("approved", False)
-                PENDING_FILE.write_text(json.dumps(pending, indent=2))
-                return jsonify({"id": email_id, "approved": email["approved"]})
-
-        return jsonify({"error": "Email not found"}), 404
+        new_approved = database.toggle_email_approval(email_id)
+        if new_approved is None:
+            return jsonify({"error": "Email not found"}), 404
+        return jsonify({"id": email_id, "approved": new_approved})
     except Exception as e:
         print(f"TOGGLE-APPROVAL ERROR: {e}")
         traceback.print_exc()
@@ -296,11 +271,7 @@ def add_to_whitelist():
             return jsonify({"error": "sender is required"}), 400
 
         email_addr = _extract_email_addr(sender)
-        whitelist = _load_whitelist()
-        whitelist.add(email_addr)
-
-        _WHITELIST_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _WHITELIST_FILE.write_text(json.dumps(sorted(whitelist), indent=2))
+        database.add_to_whitelist(email_addr)
 
         return jsonify({"whitelisted": email_addr})
     except Exception as e:

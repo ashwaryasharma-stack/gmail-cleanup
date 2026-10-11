@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
 import re
 import sys
 from collections import defaultdict
-from pathlib import Path
 
-from config import BASE_URL, STATS_FILE
+import database
+from config import BASE_URL
 
 _CATEGORY_LABELS = {
     "newsletters": "Newsletters",
@@ -34,11 +33,8 @@ def format_digest_html(
       3. Emails grouped by category
       4. 'Never delete' buttons next to each sender
 
-    Groups by category, shows top 20 per category, saves stats to data/stats.json.
+    Groups by category, shows top 20 per category, saves stats to the database.
     """
-    # Ensure data directory exists
-    Path(STATS_FILE).parent.mkdir(parents=True, exist_ok=True)
-
     if token_usage is None:
         token_usage = {}
 
@@ -200,17 +196,8 @@ def format_digest_html(
 
 
 def _cumulative_stats() -> tuple[int, float]:
-    """Returns (total_junk_across_all_scans, estimated_total_cost) from stats.json."""
-    stats_file = Path(STATS_FILE)
-    if not stats_file.exists():
-        return 0, 0.0
-    try:
-        stats = json.loads(stats_file.read_text())
-        total_junk = stats.get("total_junk", 0)
-        total_cost = stats.get("total_estimated_cost", 0.0)
-        return total_junk, total_cost
-    except (json.JSONDecodeError, KeyError):
-        return 0, 0.0
+    """Returns (total_junk_across_all_scans, estimated_total_cost)."""
+    return database.get_cumulative_stats()
 
 
 def _save_stats(
@@ -219,49 +206,18 @@ def _save_stats(
     by_category: dict[str, list[dict]],
     token_usage: dict | None = None,
 ) -> None:
-    """Saves cumulative stats to data/stats.json."""
     if token_usage is None:
         token_usage = {}
 
-    stats_file = Path(STATS_FILE)
-    stats_file.parent.mkdir(parents=True, exist_ok=True)
-
-    # Load existing stats or start fresh
-    if stats_file.exists():
-        try:
-            stats = json.loads(stats_file.read_text())
-        except json.JSONDecodeError:
-            stats = {"scans": [], "total_junk": 0, "total_by_category": {}, "total_estimated_cost": 0.0}
-    else:
-        stats = {"scans": [], "total_junk": 0, "total_by_category": {}, "total_estimated_cost": 0.0}
-
-    # Compute this run's cost
     input_tokens  = token_usage.get("input_tokens", 0)
     output_tokens = token_usage.get("output_tokens", 0)
     run_cost = (input_tokens * 3 + output_tokens * 15) / 1_000_000
 
-    # Add this scan's data
-    scan_record = {
-        "scan_date": scan_date,
-        "total_junk": len(junk_emails),
-        "by_category": {cat: len(emails) for cat, emails in by_category.items()},
-        "token_usage": token_usage,
-        "estimated_cost": round(run_cost, 6),
-    }
-    stats["scans"].append(scan_record)
-    stats["total_junk"] += len(junk_emails)
-    stats["total_estimated_cost"] = round(
-        stats.get("total_estimated_cost", 0.0) + run_cost, 6
+    database.save_stats_entry(
+        scan_date=scan_date,
+        total_junk=len(junk_emails),
+        by_category={cat: len(emails) for cat, emails in by_category.items()},
+        token_usage=token_usage,
+        estimated_cost=round(run_cost, 6),
     )
-
-    for category, emails in by_category.items():
-        stats["total_by_category"][category] = (
-            stats["total_by_category"].get(category, 0) + len(emails)
-        )
-
-    # Keep only last 10 scans to prevent huge file
-    if len(stats["scans"]) > 10:
-        stats["scans"] = stats["scans"][-10:]
-
-    stats_file.write_text(json.dumps(stats, indent=2))
-    print(f"Saved cumulative stats to {stats_file}", file=sys.stderr)
+    print("Saved stats entry to database.", file=sys.stderr)

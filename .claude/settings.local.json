@@ -16,7 +16,14 @@
       "Bash(pip3 show *)",
       "Bash(python3 -c \"import sys; print\\(sys.path\\)\")",
       "Bash(python3 -c \"import yaml, sys; yaml.safe_load\\(open\\('.github/workflows/weekly_scan.yml'\\)\\); print\\('YAML valid'\\)\")",
-      "Bash(python3 -c \"print\\('pyyaml not installed, skipping strict parse'\\)\")"
+      "Bash(python3 -c \"print\\('pyyaml not installed, skipping strict parse'\\)\")",
+      "Bash(python3 -c \"import psycopg2; print\\('psycopg2 OK', psycopg2.__version__\\)\")",
+      "Bash(python3 -c \"import database\")",
+      "Bash(env)",
+      "Bash(python3 -c \"import database; print\\('database module import OK'\\)\")",
+      "Bash(python -m py_compile config.py app.py main.py)",
+      "Bash(python3 -c \"import app; print\\('app.py import OK, token:', app.DASHBOARD_TOKEN[:8] + '...'\\)\")",
+      "Bash(python3 -c \"import main; print\\('main.py import OK'\\)\")"
     ]
   }
 }

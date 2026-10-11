@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import argparse
-import json
-import os
-import secrets
 import sys
 from collections import defaultdict
 from datetime import datetime, timezone
-from pathlib import Path
 
-from config import DAYS_TO_SCAN, DIGEST_RECIPIENT, PENDING_FILE
+import database
+from config import DASHBOARD_TOKEN, DAYS_TO_SCAN, DIGEST_RECIPIENT
 from classifier import classify_emails
 from digest import format_digest_html
 from gmail_client import GmailClient
@@ -22,22 +19,6 @@ _CATEGORY_LABELS = {
     "spam": "SPAM",
     "other": "OTHER",
 }
-
-
-_TOKEN_FILE = Path("data/token.txt")
-
-
-def _load_dashboard_token() -> str:
-    """Returns the dashboard security token, matching app.py's _load_token() logic."""
-    if tok := os.environ.get("DASHBOARD_TOKEN"):
-        return tok
-    if _TOKEN_FILE.exists():
-        return _TOKEN_FILE.read_text().strip()
-    # Generate and persist a new token so the dashboard URL stays stable
-    tok = secrets.token_urlsafe(32)
-    _TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _TOKEN_FILE.write_text(tok)
-    return tok
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────
@@ -53,38 +34,28 @@ def cmd_scan(args) -> tuple[list[dict], str]:
 
     scan_date = datetime.now(timezone.utc).isoformat()
     # Add approved=false to each email (safety: explicit approval required before deletion)
-    junk_with_approval = [
-        {**e, "approved": False}
-        for e in junk
-    ]
-    PENDING_FILE.write_text(json.dumps({
-        "scan_date": scan_date,
-        "total_scanned": len(emails),
-        "token_usage": token_usage,
-        "junk_emails": junk_with_approval,
-    }, indent=2))
+    junk_with_approval = [{**e, "approved": False} for e in junk]
+    database.save_pending(scan_date, len(emails), token_usage, junk_with_approval)
 
     keep_count = len(emails) - len(junk)
     print(f"\nResults: {len(junk)} junk / {keep_count} to keep")
-    print(f"Saved to {PENDING_FILE}", file=sys.stderr)
+    print("Saved pending scan to database.", file=sys.stderr)
     return junk, scan_date
 
 
 def cmd_digest(args) -> None:
-    if not PENDING_FILE.exists():
-        print(f"No pending scan found. Run: python main.py scan")
+    if not database.has_pending():
+        print("No pending scan found. Run: python main.py scan")
         sys.exit(1)
 
-    data = json.loads(PENDING_FILE.read_text())
+    data = database.get_pending()
     junk = data["junk_emails"]
     scan_date = data["scan_date"]
     token_usage = data.get("token_usage", {})
 
-    dashboard_token = _load_dashboard_token()
-
     client = GmailClient()
     recipient = DIGEST_RECIPIENT or client.user_email
-    html = format_digest_html(junk, scan_date, token_usage, dashboard_token)
+    html = format_digest_html(junk, scan_date, token_usage, DASHBOARD_TOKEN)
     subject = f"Gmail Cleanup: {len(junk)} junk emails found ({scan_date[:10]})"
 
     print(f"Sending digest to {recipient}...")
@@ -93,11 +64,11 @@ def cmd_digest(args) -> None:
 
 
 def cmd_approve(args) -> None:
-    if not PENDING_FILE.exists():
-        print(f"No pending scan found. Run: python main.py scan")
+    if not database.has_pending():
+        print("No pending scan found. Run: python main.py scan")
         sys.exit(1)
 
-    data = json.loads(PENDING_FILE.read_text())
+    data = database.get_pending()
     junk = data["junk_emails"]
 
     if not junk:
@@ -161,9 +132,8 @@ def cmd_approve(args) -> None:
     count = client.archive_emails([e["id"] for e in to_archive])
     print(f"Done. {count} emails archived.")
 
-    archived_ids = {e["id"] for e in to_archive}
-    data["junk_emails"] = [e for e in junk if e["id"] not in archived_ids]
-    PENDING_FILE.write_text(json.dumps(data, indent=2))
+    archived_ids = [e["id"] for e in to_archive]
+    database.remove_pending_emails(archived_ids)
 
 
 def cmd_run(args) -> None:
@@ -210,6 +180,7 @@ def _parse_selection(raw: str, emails: list[dict]) -> list[dict]:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
+    database.init_db()
     parser = argparse.ArgumentParser(
         description="Gmail cleanup automation powered by Claude AI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -222,7 +193,7 @@ def main() -> None:
         ),
     )
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("scan",    help="Fetch and classify emails; save to pending_deletions.json")
+    sub.add_parser("scan",    help="Fetch and classify emails; save results to database")
     sub.add_parser("digest",  help="Send weekly digest email of pending junk")
     sub.add_parser("approve", help="Review junk by category and archive approved emails with label 'gmail-cleanup'")
     sub.add_parser("run",     help="scan + digest in one step (weekly automation entry point)")
